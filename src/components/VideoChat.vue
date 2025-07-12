@@ -93,7 +93,6 @@
 
 <script>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { io } from 'socket.io-client'
 
 export default {
   name: 'VideoChat',
@@ -112,7 +111,8 @@ export default {
       statusMessage: 'Disconnected',
       localStream: null,
       peerConnection: null,
-      socket: null
+      userId: null,
+      pollingInterval: null
     })
 
     // WebRTC configuration
@@ -138,11 +138,10 @@ export default {
 
       // Handle ICE candidates
       state.peerConnection.onicecandidate = (event) => {
-        if (event.candidate && state.socket) {
+        if (event.candidate) {
           console.log('🧊 Sending ICE candidate')
-          state.socket.emit('ice-candidate', {
-            candidate: event.candidate,
-            targetUser: 'broadcast' // Will be handled by server to send to all other users in room
+          sendMessage('ice-candidate', {
+            candidate: event.candidate
           })
         }
       }
@@ -213,104 +212,154 @@ export default {
       }
     }
 
-    // Initialize socket connection
-    const initializeSocket = () => {
-      // Use production API endpoint for Vercel deployment
-      const socketUrl = import.meta.env.VITE_SOCKET_URL || 
-        (window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/api/socket')
-      state.socket = io(socketUrl)
+    // Initialize HTTP-based signaling
+    const initializeSignaling = () => {
+      state.userId = Math.random().toString(36).substr(2, 9)
+      state.pollingInterval = setInterval(pollMessages, 1000)
+      console.log('🔄 Started HTTP polling for signaling')
+    }
 
-      state.socket.on('connect', () => {
-        console.log('Connected to signaling server')
-        state.statusMessage = 'Connected to server'
-      })
-
-      state.socket.on('disconnect', () => {
-        console.log('Disconnected from signaling server')
-        state.statusMessage = 'Disconnected from server'
-        state.connectionStatus = 'disconnected'
-      })
-
-      // Handle WebRTC signaling
-      state.socket.on('offer', async (data) => {
-        try {
-          console.log('📨 Received offer from:', data.from)
-          await state.peerConnection.setRemoteDescription(data.offer)
-          console.log('✅ Set remote description (offer)')
-          
-          const answer = await state.peerConnection.createAnswer()
-          await state.peerConnection.setLocalDescription(answer)
-          console.log('📤 Sending answer to:', data.from)
-          
-          state.socket.emit('answer', {
-            answer: answer,
-            targetUser: data.from
+    // Poll for messages
+    const pollMessages = async () => {
+      try {
+        const response = await fetch('/api/socket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'get-messages',
+            roomId: 'kids-room',
+            userId: state.userId
           })
-        } catch (error) {
-          console.error('❌ Error handling offer:', error)
+        })
+        
+        const data = await response.json()
+        
+        if (data.messages) {
+          data.messages.forEach(handleMessage)
         }
-      })
+      } catch (error) {
+        console.error('❌ Error polling messages:', error)
+      }
+    }
 
-      state.socket.on('answer', async (data) => {
-        try {
-          console.log('📨 Received answer from:', data.from)
-          await state.peerConnection.setRemoteDescription(data.answer)
-          console.log('✅ Set remote description (answer)')
-        } catch (error) {
-          console.error('❌ Error handling answer:', error)
-        }
-      })
+    // Handle incoming messages
+    const handleMessage = async (message) => {
+      console.log('📨 Received message:', message.type)
+      
+      switch (message.type) {
+        case 'user-joined':
+          if (message.userId !== state.userId) {
+            console.log('👋 Friend joined!')
+            state.statusMessage = 'Friend joined! Creating connection...'
+            // Create offer for the new user
+            await createOffer(message.userId)
+          }
+          break
+          
+        case 'offer':
+          if (message.to === state.userId) {
+            console.log('📨 Received offer from:', message.from)
+            await handleOffer(message)
+          }
+          break
+          
+        case 'answer':
+          if (message.to === state.userId) {
+            console.log('📨 Received answer from:', message.from)
+            await handleAnswer(message)
+          }
+          break
+          
+        case 'ice-candidate':
+          if (message.from !== state.userId) {
+            console.log('🧊 Received ICE candidate from:', message.from)
+            await handleIceCandidate(message)
+          }
+          break
+          
+        case 'user-left':
+          if (message.userId !== state.userId) {
+            console.log('👋 Friend left')
+            state.statusMessage = 'Friend left the call'
+            state.isConnected = false
+            state.isConnecting = false
+          }
+          break
+      }
+    }
 
-      state.socket.on('ice-candidate', async (data) => {
-        try {
-          console.log('🧊 Received ICE candidate from:', data.from)
-          await state.peerConnection.addIceCandidate(data.candidate)
-          console.log('✅ Added ICE candidate')
-        } catch (error) {
-          console.error('❌ Error adding ICE candidate:', error)
-        }
-      })
-
-      // Handle create offer request
-      state.socket.on('create-offer', async (data) => {
-        try {
-          console.log('📤 Creating offer for user:', data.targetUser)
-          const offer = await state.peerConnection.createOffer()
-          await state.peerConnection.setLocalDescription(offer)
-          console.log('📤 Sending offer to:', data.targetUser)
-          state.socket.emit('offer', {
-            offer: offer,
-            targetUser: data.targetUser
+    // Send message to signaling server
+    const sendMessage = async (action, data = {}) => {
+      try {
+        await fetch('/api/socket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            roomId: 'kids-room',
+            userId: state.userId,
+            data
           })
-        } catch (error) {
-          console.error('❌ Error creating offer:', error)
-        }
-      })
+        })
+      } catch (error) {
+        console.error('❌ Error sending message:', error)
+      }
+    }
 
-      // Handle user joined room
-      state.socket.on('user-joined-room', (data) => {
-        console.log('New user joined room:', data.newUserId)
-        state.statusMessage = 'Friend joined! Creating connection...'
-      })
+    // Create and send offer
+    const createOffer = async (targetUser) => {
+      try {
+        console.log('📤 Creating offer for user:', targetUser)
+        const offer = await state.peerConnection.createOffer()
+        await state.peerConnection.setLocalDescription(offer)
+        console.log('📤 Sending offer to:', targetUser)
+        
+        await sendMessage('offer', {
+          offer: offer,
+          targetUser: targetUser
+        })
+      } catch (error) {
+        console.error('❌ Error creating offer:', error)
+      }
+    }
 
-      // Handle user joined (when someone else joins)
-      state.socket.on('user-joined', (data) => {
-        console.log('Another user joined:', data.userId)
-        state.statusMessage = 'Friend joined! Waiting for connection...'
-      })
+    // Handle incoming offer
+    const handleOffer = async (message) => {
+      try {
+        await state.peerConnection.setRemoteDescription(message.offer)
+        console.log('✅ Set remote description (offer)')
+        
+        const answer = await state.peerConnection.createAnswer()
+        await state.peerConnection.setLocalDescription(answer)
+        console.log('📤 Sending answer to:', message.from)
+        
+        await sendMessage('answer', {
+          answer: answer,
+          targetUser: message.from
+        })
+      } catch (error) {
+        console.error('❌ Error handling offer:', error)
+      }
+    }
 
-      // Handle room events
-      state.socket.on('user-joined', () => {
-        console.log('Another user joined the room')
-        state.statusMessage = 'Friend joined!'
-      })
+    // Handle incoming answer
+    const handleAnswer = async (message) => {
+      try {
+        await state.peerConnection.setRemoteDescription(message.answer)
+        console.log('✅ Set remote description (answer)')
+      } catch (error) {
+        console.error('❌ Error handling answer:', error)
+      }
+    }
 
-      state.socket.on('user-left', () => {
-        console.log('User left the room')
-        state.statusMessage = 'Friend left the call'
-        state.isConnected = false
-        state.isConnecting = false
-      })
+    // Handle incoming ICE candidate
+    const handleIceCandidate = async (message) => {
+      try {
+        await state.peerConnection.addIceCandidate(message.candidate)
+        console.log('✅ Added ICE candidate')
+      } catch (error) {
+        console.error('❌ Error adding ICE candidate:', error)
+      }
     }
 
     // Start the call
@@ -319,15 +368,15 @@ export default {
         state.isConnecting = true
         state.statusMessage = 'Getting ready...'
         
-        // Initialize WebRTC and socket
+        // Initialize WebRTC and signaling
         initializeWebRTC()
-        initializeSocket()
+        initializeSignaling()
         
         // Get user media
         await getUserMedia()
         
         // Join the room
-        state.socket.emit('join-room', 'kids-room')
+        await sendMessage('join', {})
         
         state.statusMessage = 'Waiting for friend...'
         
@@ -350,10 +399,13 @@ export default {
         state.peerConnection = null
       }
       
-      if (state.socket) {
-        state.socket.disconnect()
-        state.socket = null
+      if (state.pollingInterval) {
+        clearInterval(state.pollingInterval)
+        state.pollingInterval = null
       }
+      
+      // Leave the room
+      sendMessage('leave', {})
       
       state.isConnected = false
       state.isConnecting = false
