@@ -5,6 +5,7 @@
       <div class="status-indicator" :class="connectionStatus">
         <span class="status-dot"></span>
         {{ statusMessage }}
+        <span v-if="userId" class="user-id">({{ userId }})</span>
       </div>
     </div>
 
@@ -23,7 +24,7 @@
       </div>
 
       <!-- Remote Video -->
-      <div class="video-wrapper remote-video" v-if="isConnected">
+      <div class="video-wrapper remote-video" v-if="showRemoteVideo">
         <video 
           ref="remoteVideo" 
           autoplay 
@@ -38,11 +39,16 @@
         <div class="waiting-content">
           <div class="waiting-icon">📞</div>
           <h2>Ready to Chat!</h2>
-          <p>Click "Start Chat" to begin your video call</p>
+          <p v-if="!userId">
+            Add ?user=dede or ?user=kia to the URL to start chatting
+          </p>
+          <p v-else>
+            Click "Start Chat" to begin your video call
+          </p>
           <button 
             @click="startCall" 
             class="start-button"
-            :disabled="isConnecting"
+            :disabled="isConnecting || !userId"
           >
             {{ isConnecting ? 'Connecting...' : 'Start Chat' }}
           </button>
@@ -92,7 +98,7 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 
 export default {
   name: 'VideoChat',
@@ -112,8 +118,36 @@ export default {
       localStream: null,
       peerConnection: null,
       userId: null,
-      pollingInterval: null
+      pollingInterval: null,
+      socket: null, // Added for WebSocket
+      pendingIceCandidates: [], // Added for queuing ICE candidates
+      remoteStream: null // Store remote stream for later use
     })
+
+    // Computed property for safe user ID access
+    const userId = computed(() => state.userId || '')
+    
+    // Computed property to show remote video when we have a peer connection
+    const showRemoteVideo = computed(() => {
+      return state.isConnected || state.isConnecting || !!state.peerConnection
+    })
+
+    // Initialize user ID from URL parameters
+    const initializeUserId = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const userIdParam = urlParams.get('user')
+      
+      // Only accept "dede" and "kia" as valid user IDs
+      if (userIdParam === 'dede' || userIdParam === 'kia') {
+        state.userId = userIdParam
+        console.log('✅ User ID set to:', state.userId)
+        state.statusMessage = 'Ready to chat'
+      } else {
+        // Show error for invalid user ID
+        state.statusMessage = 'Invalid user ID. Use ?user=dede or ?user=kia'
+        console.error('❌ Invalid user ID:', userIdParam)
+      }
+    }
 
     // WebRTC configuration
     const rtcConfig = {
@@ -126,13 +160,38 @@ export default {
     // Initialize WebRTC
     const initializeWebRTC = () => {
       state.peerConnection = new RTCPeerConnection(rtcConfig)
+      console.debug('boi', state.peerConnection)
       
       // Handle incoming streams
       state.peerConnection.ontrack = (event) => {
         console.log('🎥 Received remote track:', event.track.kind)
-        if (remoteVideo.value) {
-          remoteVideo.value.srcObject = event.streams[0]
-          console.log('✅ Remote video stream set')
+        console.log('📺 Remote video element:', remoteVideo.value)
+        console.log('📺 Remote streams:', event.streams)
+        
+        // Try to set the remote video stream
+        const setRemoteVideo = () => {
+          if (remoteVideo.value && event.streams && event.streams[0]) {
+            remoteVideo.value.srcObject = event.streams[0]
+            state.remoteStream = event.streams[0] // Store for later use
+            console.log('✅ Remote video stream set')
+            return true
+          } else {
+            console.log('⏳ Remote video element not ready, will retry...')
+            return false
+          }
+        }
+        
+        // Try immediately
+        if (!setRemoteVideo()) {
+          // If failed, try again after DOM update
+          nextTick(() => {
+            if (!setRemoteVideo()) {
+              console.error('❌ Cannot set remote video stream after retry:', {
+                remoteVideo: remoteVideo.value,
+                streams: event.streams
+              })
+            }
+          })
         }
       }
 
@@ -141,13 +200,21 @@ export default {
         if (event.candidate) {
           console.log('🧊 Sending ICE candidate')
           sendMessage('ice-candidate', {
-            candidate: event.candidate
+            candidate: event.candidate,
+            targetUser: 'broadcast' // Send to all other users
           })
         }
       }
 
       // Handle connection state changes
       state.peerConnection.onconnectionstatechange = () => {
+        console.log('🔗 Connection state changed:', state.peerConnection.connectionState)
+        updateConnectionStatus()
+      }
+
+      // Handle ICE connection state changes
+      state.peerConnection.oniceconnectionstatechange = () => {
+        console.log('🧊 ICE connection state changed:', state.peerConnection.iceConnectionState)
         updateConnectionStatus()
       }
     }
@@ -166,6 +233,30 @@ export default {
           state.isConnected = true
           state.isConnecting = false
           console.log('✅ WebRTC connection established!')
+          
+                            // Ensure remote video is set if we have streams
+          if (state.peerConnection.getReceivers) {
+            const receivers = state.peerConnection.getReceivers()
+            console.log('📺 Checking receivers:', receivers.length)
+            const videoReceiver = receivers.find(r => r.track && r.track.kind === 'video')
+            if (videoReceiver && videoReceiver.track && remoteVideo.value) {
+              const stream = new MediaStream([videoReceiver.track])
+              remoteVideo.value.srcObject = stream
+              state.remoteStream = stream
+              console.log('✅ Set remote video stream on connection')
+            } else if (state.remoteStream && remoteVideo.value) {
+              // Use stored remote stream
+              remoteVideo.value.srcObject = state.remoteStream
+              console.log('✅ Set stored remote video stream on connection')
+            } else {
+              console.log('❌ No video receiver or remote video element:', {
+                videoReceiver: !!videoReceiver,
+                hasTrack: videoReceiver?.track,
+                remoteVideo: !!remoteVideo.value,
+                hasRemoteStream: !!state.remoteStream
+              })
+            }
+          }
         } else if (connectionState === 'connecting' || iceConnectionState === 'checking') {
           state.connectionStatus = 'connecting'
           state.statusMessage = 'Connecting...'
@@ -204,6 +295,12 @@ export default {
           })
         }
         
+        // If we already have a remote description, we need to create a new offer
+        if (state.peerConnection.remoteDescription && state.peerConnection.remoteDescription.type === 'answer') {
+          console.log('🔄 Creating new offer after adding tracks')
+          createOffer(state.userId === 'dede' ? 'kia' : 'dede')
+        }
+        
         return stream
       } catch (error) {
         console.error('❌ Error accessing media devices:', error)
@@ -212,9 +309,59 @@ export default {
       }
     }
 
-    // Initialize HTTP-based signaling
+    // Initialize signaling based on environment
     const initializeSignaling = () => {
-      state.userId = Math.random().toString(36).substr(2, 9)
+      // Use WebSocket for local development, HTTP polling for production
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        initializeWebSocket()
+      } else {
+        initializeHttpPolling()
+      }
+    }
+
+    // Initialize WebSocket signaling (for local development)
+    const initializeWebSocket = () => {
+      console.log('🔌 Connecting to WebSocket signaling server...')
+      
+      // Connect to local WebSocket server
+      const socket = new WebSocket('ws://localhost:3001')
+      
+      socket.onopen = () => {
+        console.log('✅ WebSocket connected')
+        state.socket = socket
+        
+        // Set the user ID for this connection
+        socket.userId = state.userId
+        
+        // Join the room
+        socket.send(JSON.stringify({
+          type: 'join-room',
+          roomId: 'kids-room',
+          userId: state.userId
+        }))
+      }
+      
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data)
+          handleWebSocketMessage(message)
+        } catch (error) {
+          console.error('❌ Error parsing WebSocket message:', error)
+        }
+      }
+      
+      socket.onerror = (error) => {
+        console.error('❌ WebSocket error:', error)
+      }
+      
+      socket.onclose = () => {
+        console.log('🔌 WebSocket disconnected')
+        state.socket = null
+      }
+    }
+
+    // Initialize HTTP polling signaling (for production)
+    const initializeHttpPolling = () => {
       state.pollingInterval = setInterval(pollMessages, 1000)
       console.log('🔄 Started HTTP polling for signaling')
     }
@@ -251,8 +398,10 @@ export default {
           if (message.userId !== state.userId) {
             console.log('👋 Friend joined!')
             state.statusMessage = 'Friend joined! Creating connection...'
-            // Create offer for the new user
-            await createOffer(message.userId)
+            // Only dede creates the offer (dede < kia alphabetically)
+            if (state.userId === 'dede') {
+              createOffer(message.userId)
+            }
           }
           break
           
@@ -288,19 +437,78 @@ export default {
       }
     }
 
+    // Handle WebSocket messages
+    const handleWebSocketMessage = (message) => {
+      console.log('📨 Received WebSocket message:', message)
+      switch (message.type) {
+        case 'offer':
+          if (message.to === state.userId) {
+            console.log('📨 Received offer from:', message.from)
+            handleOffer(message)
+          }
+          break
+        case 'answer':
+          if (message.to === state.userId) {
+            console.log('📨 Received answer from:', message.from)
+            handleAnswer(message)
+          }
+          break
+        case 'ice-candidate':
+          if (message.from !== state.userId) {
+            console.log('🧊 Received ICE candidate from:', message.from)
+            handleIceCandidate(message)
+          }
+          break
+        case 'user-joined':
+          if (message.userId !== state.userId) {
+            console.log('👋 Friend joined!')
+            state.statusMessage = 'Friend joined! Creating connection...'
+            // Only create offer if our ID comes first alphabetically
+            // This ensures only one user creates the offer
+            if (state.userId < message.userId) {
+              console.log('📤 Creating offer (our ID comes first)')
+              createOffer(message.userId)
+            } else {
+              console.log('⏳ Waiting for offer (friend\'s ID comes first)')
+              state.statusMessage = 'Friend joined! Waiting for connection...'
+            }
+          }
+          break
+        case 'user-left':
+          if (message.userId !== state.userId) {
+            console.log('👋 Friend left')
+            state.statusMessage = 'Friend left the call'
+            state.isConnected = false
+            state.isConnecting = false
+          }
+          break
+        default:
+          console.log('📨 Unknown message type:', message.type)
+      }
+    }
+
     // Send message to signaling server
     const sendMessage = async (action, data = {}) => {
       try {
-        await fetch('/api/socket', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action,
+        if (state.socket) {
+          state.socket.send(JSON.stringify({
+            type: action,
             roomId: 'kids-room',
             userId: state.userId,
             data
+          }))
+        } else {
+          await fetch('/api/socket', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action,
+              roomId: 'kids-room',
+              userId: state.userId,
+              data
+            })
           })
-        })
+        }
       } catch (error) {
         console.error('❌ Error sending message:', error)
       }
@@ -309,6 +517,12 @@ export default {
     // Create and send offer
     const createOffer = async (targetUser) => {
       try {
+        // Don't create offer if we're already negotiating
+        if (state.peerConnection.signalingState !== 'stable') {
+          console.log('⏳ Skipping offer creation - already negotiating')
+          return
+        }
+        
         console.log('📤 Creating offer for user:', targetUser)
         const offer = await state.peerConnection.createOffer()
         await state.peerConnection.setLocalDescription(offer)
@@ -326,6 +540,12 @@ export default {
     // Handle incoming offer
     const handleOffer = async (message) => {
       try {
+        // If we're already negotiating, we might need to rollback
+        if (state.peerConnection.signalingState !== 'stable') {
+          console.log('🔄 Rolling back due to negotiation conflict')
+          await state.peerConnection.setLocalDescription({ type: 'rollback' })
+        }
+        
         await state.peerConnection.setRemoteDescription(message.offer)
         console.log('✅ Set remote description (offer)')
         
@@ -337,8 +557,28 @@ export default {
           answer: answer,
           targetUser: message.from
         })
+
+        // Add pending ICE candidates after remote description is set
+        await addPendingIceCandidates()
       } catch (error) {
         console.error('❌ Error handling offer:', error)
+        // If there's a negotiation conflict, try to recover
+        if (error.name === 'InvalidAccessError' && error.message.includes('m-lines')) {
+          console.log('🔄 Attempting to recover from negotiation conflict...')
+          try {
+            await state.peerConnection.setLocalDescription({ type: 'rollback' })
+            await state.peerConnection.setRemoteDescription(message.offer)
+            const answer = await state.peerConnection.createAnswer()
+            await state.peerConnection.setLocalDescription(answer)
+            await sendMessage('answer', {
+              answer: answer,
+              targetUser: message.from
+            })
+            await addPendingIceCandidates()
+          } catch (recoveryError) {
+            console.error('❌ Failed to recover from negotiation conflict:', recoveryError)
+          }
+        }
       }
     }
 
@@ -347,6 +587,8 @@ export default {
       try {
         await state.peerConnection.setRemoteDescription(message.answer)
         console.log('✅ Set remote description (answer)')
+        // Add pending ICE candidates after remote description is set
+        await addPendingIceCandidates()
       } catch (error) {
         console.error('❌ Error handling answer:', error)
       }
@@ -355,16 +597,48 @@ export default {
     // Handle incoming ICE candidate
     const handleIceCandidate = async (message) => {
       try {
-        await state.peerConnection.addIceCandidate(message.candidate)
-        console.log('✅ Added ICE candidate')
+        // Only add ICE candidates if we have a remote description
+        if (state.peerConnection.remoteDescription) {
+          await state.peerConnection.addIceCandidate(message.candidate)
+          console.log('✅ Added ICE candidate')
+        } else {
+          console.log('⏳ Queuing ICE candidate (waiting for remote description)')
+          // Queue the candidate to add later
+          if (!state.pendingIceCandidates) {
+            state.pendingIceCandidates = []
+          }
+          state.pendingIceCandidates.push(message.candidate)
+        }
       } catch (error) {
         console.error('❌ Error adding ICE candidate:', error)
+      }
+    }
+
+    // Add pending ICE candidates after remote description is set
+    const addPendingIceCandidates = async () => {
+      if (state.pendingIceCandidates && state.pendingIceCandidates.length > 0) {
+        console.log('📦 Adding pending ICE candidates:', state.pendingIceCandidates.length)
+        for (const candidate of state.pendingIceCandidates) {
+          try {
+            await state.peerConnection.addIceCandidate(candidate)
+            console.log('✅ Added pending ICE candidate')
+          } catch (error) {
+            console.error('❌ Error adding pending ICE candidate:', error)
+          }
+        }
+        state.pendingIceCandidates = []
       }
     }
 
     // Start the call
     const startCall = async () => {
       try {
+        // Check if user ID is valid
+        if (!state.userId) {
+          state.statusMessage = 'Invalid user ID. Use ?user=dede or ?user=kia'
+          return
+        }
+        
         state.isConnecting = true
         state.statusMessage = 'Getting ready...'
         
@@ -372,10 +646,10 @@ export default {
         initializeWebRTC()
         initializeSignaling()
         
-        // Get user media
+        // Get user media first
         await getUserMedia()
         
-        // Join the room
+        // Join the room after getting media
         await sendMessage('join', {})
         
         state.statusMessage = 'Waiting for friend...'
@@ -402,6 +676,11 @@ export default {
       if (state.pollingInterval) {
         clearInterval(state.pollingInterval)
         state.pollingInterval = null
+      }
+      
+      if (state.socket) {
+        state.socket.close()
+        state.socket = null
       }
       
       // Leave the room
@@ -444,10 +723,26 @@ export default {
       endCall()
     })
 
+    // Initialize user ID when component mounts
+    onMounted(() => {
+      initializeUserId()
+    })
+    
+    // Watch for remote video element availability
+    watch(remoteVideo, (newElement) => {
+      if (newElement && state.remoteStream) {
+        console.log('📺 Remote video element became available, setting stream')
+        newElement.srcObject = state.remoteStream
+      }
+    })
+
     return {
       // Refs
       localVideo,
       remoteVideo,
+      
+      // Computed
+      showRemoteVideo,
       
       // State
       isConnected: ref(state.isConnected),
@@ -456,6 +751,7 @@ export default {
       isVideoOn: ref(state.isVideoOn),
       connectionStatus: ref(state.connectionStatus),
       statusMessage: ref(state.statusMessage),
+      userId, // Add computed userId
       
       // Methods
       startCall,
@@ -492,6 +788,12 @@ export default {
   gap: 0.5rem;
   font-size: 0.9rem;
   color: #6c757d;
+}
+
+.user-id {
+  font-weight: bold;
+  color: #007bff;
+  margin-left: 0.5rem;
 }
 
 .status-dot {

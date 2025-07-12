@@ -5,7 +5,14 @@ export default defineConfig({
     plugins: [vue()],
     server: {
         port: 3000,
-        host: true
+        host: true,
+        proxy: {
+            '/api/socket': {
+                target: 'http://localhost:3001',
+                changeOrigin: true,
+                secure: false
+            }
+        }
     },
     build: {
         outDir: 'dist',
@@ -18,5 +25,8 @@ export default defineConfig({
     },
     optimizeDeps: {
         include: ['socket.io-client']
+    },
+    esbuild: {
+        target: 'es2020'
     }
 }) 
