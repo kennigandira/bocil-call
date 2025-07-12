@@ -141,26 +141,27 @@ import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from
 export default {
   name: 'VideoChatLocal',
   setup() {
-    // Refs for video elements
+    // Refs
     const localVideo = ref(null)
     const remoteVideo = ref(null)
-
-    // Reactive state
+    const isConnected = ref(false)
+    
+    // State
     const state = reactive({
-      isConnected: false,
+      userId: '',
+      localStream: null,
+      remoteStream: null,
+      peerConnection: null,
+      socket: null,
       isConnecting: false,
       isMuted: false,
       isVideoOn: true,
       connectionStatus: 'disconnected',
-      statusMessage: 'Disconnected',
-      localStream: null,
-      peerConnection: null,
-      userId: null,
-      socket: null,
+      statusMessage: 'Ready to start call',
       pendingIceCandidates: [],
-      remoteStream: null,
       chatMessages: [],
-      newMessage: ''
+      newMessage: '',
+      friendUserId: null // Added for friend's user ID
     })
 
     // Computed properties
@@ -225,10 +226,14 @@ export default {
       state.peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
           console.log('🧊 Sending ICE candidate')
-          sendWebSocketMessage('ice-candidate', {
-            candidate: event.candidate,
-            targetUser: 'broadcast'
-          })
+          // Find the other user in the room
+          const otherUser = getOtherUserInRoom()
+          if (otherUser) {
+            sendWebSocketMessage('ice-candidate', {
+              candidate: event.candidate,
+              to: otherUser
+            })
+          }
         }
       }
 
@@ -254,7 +259,7 @@ export default {
         if (connectionState === 'connected' && iceConnectionState === 'connected') {
           state.connectionStatus = 'connected'
           state.statusMessage = 'Connected'
-          state.isConnected = true
+          isConnected.value = true
           state.isConnecting = false
           console.log('✅ WebRTC connection established!')
           
@@ -276,7 +281,7 @@ export default {
         } else if (connectionState === 'failed' || iceConnectionState === 'failed') {
           state.connectionStatus = 'failed'
           state.statusMessage = 'Connection Failed'
-          state.isConnected = false
+          isConnected.value = false
           state.isConnecting = false
         } else {
           state.statusMessage = `Status: ${connectionState}/${iceConnectionState}`
@@ -388,8 +393,9 @@ export default {
           if (message.userId !== state.userId) {
             console.log('👋 Friend joined!')
             state.statusMessage = 'Friend joined! Creating connection...'
-            state.isConnected = false
+            isConnected.value = false
             state.isConnecting = true
+            state.friendUserId = message.userId // Store friend's user ID
             
             if (state.userId < message.userId) {
               console.log('📤 Creating offer (our ID comes first)')
@@ -406,7 +412,7 @@ export default {
           if (message.userId !== state.userId) {
             console.log('👋 Friend left')
             state.statusMessage = 'Friend left the call'
-            state.isConnected = false
+            isConnected.value = false
             state.isConnecting = false
           }
           break
@@ -449,7 +455,7 @@ export default {
         
         console.log('📤 Sending answer')
         sendWebSocketMessage('answer', {
-          answer,
+          answer: answer,
           to: message.from
         })
       } catch (error) {
@@ -493,19 +499,30 @@ export default {
       }
     }
 
+    // Helper function to get the other user in the room
+    const getOtherUserInRoom = () => {
+      // For now, we'll use a simple approach - if we have a friend's ID stored
+      // In a real app, you'd get this from the server
+      if (state.friendUserId) {
+        return state.friendUserId
+      }
+      // Fallback: if we're 'dede', send to 'kia', and vice versa
+      return state.userId === 'dede' ? 'kia' : 'dede'
+    }
+
     // Create offer
     const createOffer = async (targetUserId) => {
       try {
         console.log('📤 Creating offer for:', targetUserId)
-        
         const offer = await state.peerConnection.createOffer()
         await state.peerConnection.setLocalDescription(offer)
         
-        console.log('📤 Sending offer')
         sendWebSocketMessage('offer', {
-          offer,
+          offer: offer,
           to: targetUserId
         })
+        
+        console.log('📤 Offer sent')
       } catch (error) {
         console.error('❌ Error creating offer:', error)
       }
@@ -557,7 +574,7 @@ export default {
       }
       
       // Reset state
-      state.isConnected = false
+      isConnected.value = false
       state.isConnecting = false
       state.connectionStatus = 'disconnected'
       state.statusMessage = 'Disconnected'
@@ -613,7 +630,7 @@ export default {
     }
 
     const sendChatMessage = () => {
-      if (state.newMessage.trim() && state.isConnected) {
+      if (state.newMessage.trim() && isConnected.value) {
         sendWebSocketMessage('chat-message', {
           text: state.newMessage.trim(),
           targetUser: 'broadcast'
@@ -641,14 +658,9 @@ export default {
       // Refs
       localVideo,
       remoteVideo,
+      isConnected,
       
       // State
-      isConnected: computed(() => state.isConnected),
-      isConnecting: computed(() => state.isConnecting),
-      isMuted: computed(() => state.isMuted),
-      isVideoOn: computed(() => state.isVideoOn),
-      connectionStatus: computed(() => state.connectionStatus),
-      statusMessage: computed(() => state.statusMessage),
       userId,
       showRemoteVideo,
       chatMessages: computed(() => state.chatMessages),
@@ -656,6 +668,11 @@ export default {
         get: () => state.newMessage,
         set: (value) => { state.newMessage = value }
       }),
+      isConnecting: computed(() => state.isConnecting),
+      isMuted: computed(() => state.isMuted),
+      isVideoOn: computed(() => state.isVideoOn),
+      connectionStatus: computed(() => state.connectionStatus),
+      statusMessage: computed(() => state.statusMessage),
       
       // Methods
       startCall,

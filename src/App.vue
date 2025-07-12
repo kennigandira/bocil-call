@@ -24,13 +24,13 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, markRaw, shallowRef } from 'vue'
 import ENV from './config/environment.js'
 
 export default {
   name: 'App',
   setup() {
-    const currentComponent = ref(null)
+    const currentComponent = shallowRef(null)
     const environmentName = ref('')
     const signalingMethod = ref('')
 
@@ -45,13 +45,13 @@ export default {
         if (ENV.isDevelopment()) {
           console.log('🔧 Development environment detected')
           const { default: VideoChatLocal } = await import('./components/VideoChatLocal.vue')
-          currentComponent.value = VideoChatLocal
+          currentComponent.value = markRaw(VideoChatLocal)
           environmentName.value = 'Development'
           signalingMethod.value = 'WebSocket'
         } else {
           console.log('🚀 Production environment detected')
           const { default: VideoChatProduction } = await import('./components/VideoChatProduction.vue')
-          currentComponent.value = VideoChatProduction
+          currentComponent.value = markRaw(VideoChatProduction)
           environmentName.value = 'Production'
           signalingMethod.value = 'HTTP Polling'
         }
@@ -59,7 +59,7 @@ export default {
         console.error('❌ Error loading component:', error)
         // Fallback to production component
         const { default: VideoChatProduction } = await import('./components/VideoChatProduction.vue')
-        currentComponent.value = VideoChatProduction
+        currentComponent.value = markRaw(VideoChatProduction)
         environmentName.value = 'Production (Fallback)'
         signalingMethod.value = 'HTTP Polling'
       }
