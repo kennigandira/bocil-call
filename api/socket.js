@@ -32,6 +32,9 @@ export default function handler(req, res) {
         case 'ice-candidate':
             handleIceCandidate(res, roomId, userId, data)
             break
+        case 'chat-message':
+            handleChatMessage(res, roomId, userId, data)
+            break
         case 'get-messages':
             handleGetMessages(res, roomId, userId)
             break
@@ -121,6 +124,20 @@ function handleIceCandidate(res, roomId, userId, data) {
             type: 'ice-candidate',
             from: userId,
             candidate: data.candidate,
+            timestamp: Date.now()
+        })
+    }
+
+    res.json({ success: true })
+}
+
+function handleChatMessage(res, roomId, userId, data) {
+    const room = rooms.get(roomId)
+    if (room) {
+        room.messages.push({
+            type: 'chat-message',
+            from: userId,
+            message: data.message,
             timestamp: Date.now()
         })
     }

@@ -315,8 +315,32 @@ export default {
 
     // Initialize HTTP polling signaling
     const initializeHttpPolling = () => {
+      // First join the room
+      joinRoom()
+      
+      // Then start polling
       state.pollingInterval = setInterval(pollMessages, 1000)
       console.log('🔄 Started HTTP polling for signaling')
+    }
+
+    // Join room
+    const joinRoom = async () => {
+      try {
+        const response = await fetch('/api/socket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'join',
+            roomId: 'kids-room',
+            userId: state.userId
+          })
+        })
+        
+        const data = await response.json()
+        console.log('✅ Joined room:', data)
+      } catch (error) {
+        console.error('❌ Error joining room:', error)
+      }
     }
 
     // Poll for messages
@@ -345,18 +369,42 @@ export default {
     // Send HTTP message
     const sendHttpMessage = async (type, data) => {
       try {
+        let action = type
+        let messageData = data
+        
+        // Map message types to API actions
+        if (type === 'offer') {
+          action = 'offer'
+          messageData = {
+            targetUser: data.to,
+            offer: data.offer
+          }
+        } else if (type === 'answer') {
+          action = 'answer'
+          messageData = {
+            targetUser: data.to,
+            answer: data.answer
+          }
+        } else if (type === 'ice-candidate') {
+          action = 'ice-candidate'
+          messageData = {
+            candidate: data.candidate
+          }
+        } else if (type === 'chat-message') {
+          action = 'chat-message'
+          messageData = {
+            message: data.text
+          }
+        }
+        
         const response = await fetch('/api/socket', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action: 'send-message',
+            action,
             roomId: 'kids-room',
             userId: state.userId,
-            message: {
-              type,
-              from: state.userId,
-              ...data
-            }
+            data: messageData
           })
         })
         
@@ -425,7 +473,7 @@ export default {
         case 'chat-message':
           if (message.from !== state.userId) {
             console.log('💬 Received chat message from:', message.from)
-            addChatMessage(message.from, message.text)
+            addChatMessage(message.from, message.message)
           }
           break
           
@@ -551,6 +599,9 @@ export default {
     const endCall = () => {
       console.log('📞 Ending call')
       
+      // Leave the room
+      leaveRoom()
+      
       // Stop local stream
       if (state.localStream) {
         state.localStream.getTracks().forEach(track => track.stop())
@@ -583,6 +634,26 @@ export default {
       }
       if (remoteVideo.value) {
         remoteVideo.value.srcObject = null
+      }
+    }
+
+    // Leave room
+    const leaveRoom = async () => {
+      try {
+        const response = await fetch('/api/socket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'leave',
+            roomId: 'kids-room',
+            userId: state.userId
+          })
+        })
+        
+        const data = await response.json()
+        console.log('✅ Left room:', data)
+      } catch (error) {
+        console.error('❌ Error leaving room:', error)
       }
     }
 
@@ -628,8 +699,7 @@ export default {
     const sendChatMessage = () => {
       if (state.newMessage.trim() && state.isConnected) {
         sendHttpMessage('chat-message', {
-          text: state.newMessage.trim(),
-          targetUser: 'broadcast'
+          text: state.newMessage.trim()
         })
         
         addChatMessage(state.userId, state.newMessage.trim())

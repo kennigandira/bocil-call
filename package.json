@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "vite",
         "dev:local": "vite --config vite.config.dev.js",
-        "dev:full": "concurrently \"bun run server\" \"bun run dev:local\"",
+        "dev:full": "concurrently \"bun run server:dev\" \"bun run dev:local\"",
         "build": "vite build",
         "build:dev": "vite build --config vite.config.dev.js",
         "build:prod": "vite build --config vite.config.prod.js",
