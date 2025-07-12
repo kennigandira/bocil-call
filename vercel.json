@@ -1,0 +1,38 @@
+{
+    "version": 2,
+    "builds": [
+        {
+            "src": "package.json",
+            "use": "@vercel/static-build",
+            "config": {
+                "distDir": "dist"
+            }
+        },
+        {
+            "src": "api/socket.js",
+            "use": "@vercel/node"
+        }
+    ],
+    "routes": [
+        {
+            "src": "/api/socket",
+            "dest": "/api/socket.js"
+        },
+        {
+            "src": "/socket.io/(.*)",
+            "dest": "/api/socket.js"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/index.html"
+        }
+    ],
+    "functions": {
+        "api/socket.js": {
+            "runtime": "nodejs18.x"
+        }
+    },
+    "env": {
+        "NODE_ENV": "production"
+    }
+}
