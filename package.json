@@ -5,14 +5,21 @@
     "main": "index.js",
     "scripts": {
         "dev": "vite",
+        "dev:local": "vite --config vite.config.dev.js",
+        "dev:full": "concurrently \"bun run server\" \"bun run dev:local\"",
         "build": "vite build",
+        "build:dev": "vite build --config vite.config.dev.js",
+        "build:prod": "vite build --config vite.config.prod.js",
         "preview": "vite preview",
+        "preview:dev": "vite preview --port 4173",
         "serve": "vite preview",
         "server": "bun run server.js",
-        "dev:full": "concurrently \"bun run server\" \"bun run dev\""
+        "server:dev": "bun run server.dev.js",
+        "server:node": "node server.js",
+        "clean": "rm -rf dist dist-dev node_modules/.vite"
     },
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=20.0.0"
     },
     "dependencies": {
         "cors": "^2.8.5",

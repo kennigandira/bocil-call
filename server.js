@@ -108,12 +108,13 @@ const handleJoinRoom = (ws, message) => {
 
 // Handle WebRTC offer
 const handleOffer = (ws, message) => {
-    const targetUser = findUserById(message.data.targetUser)
+    // Use root-level 'to' property instead of message.data.targetUser
+    const targetUser = findUserById(message.to || message.targetUser)
     if (targetUser) {
         console.log('Offer received from', ws.id, 'to', targetUser.id)
         targetUser.send(JSON.stringify({
             type: 'offer',
-            offer: message.data.offer,
+            offer: message.offer,
             from: ws.id,
             to: targetUser.id
         }))
@@ -122,12 +123,12 @@ const handleOffer = (ws, message) => {
 
 // Handle WebRTC answer
 const handleAnswer = (ws, message) => {
-    const targetUser = findUserById(message.data.targetUser)
+    const targetUser = findUserById(message.to || message.targetUser)
     if (targetUser) {
         console.log('Answer received from', ws.id, 'to', targetUser.id)
         targetUser.send(JSON.stringify({
             type: 'answer',
-            answer: message.data.answer,
+            answer: message.answer,
             from: ws.id,
             to: targetUser.id
         }))
@@ -136,16 +137,16 @@ const handleAnswer = (ws, message) => {
 
 // Handle chat messages
 const handleChatMessage = (ws, message) => {
-    if (message.data.targetUser === 'broadcast') {
+    if ((message.targetUser || message.to) === 'broadcast') {
         // Broadcast to all other users in the same room
         for (const [roomId, room] of rooms.entries()) {
             if (room.has(ws)) {
                 room.forEach(user => {
                     if (user !== ws) {
-                        console.log('Chat message from', ws.id, 'to', user.id, ':', message.data.text)
+                        console.log('Chat message from', ws.id, 'to', user.id, ':', message.text)
                         user.send(JSON.stringify({
                             type: 'chat-message',
-                            text: message.data.text,
+                            text: message.text,
                             from: ws.id,
                             to: user.id
                         }))
@@ -156,12 +157,12 @@ const handleChatMessage = (ws, message) => {
         }
     } else {
         // Send to specific user
-        const targetUser = findUserById(message.data.targetUser)
+        const targetUser = findUserById(message.to || message.targetUser)
         if (targetUser) {
-            console.log('Chat message from', ws.id, 'to', targetUser.id, ':', message.data.text)
+            console.log('Chat message from', ws.id, 'to', targetUser.id, ':', message.text)
             targetUser.send(JSON.stringify({
                 type: 'chat-message',
-                text: message.data.text,
+                text: message.text,
                 from: ws.id,
                 to: targetUser.id
             }))
@@ -171,7 +172,7 @@ const handleChatMessage = (ws, message) => {
 
 // Handle ICE candidates
 const handleIceCandidate = (ws, message) => {
-    if (message.data.targetUser === 'broadcast') {
+    if ((message.targetUser || message.to) === 'broadcast') {
         // Broadcast to all other users in the same room
         for (const [roomId, room] of rooms.entries()) {
             if (room.has(ws)) {
@@ -180,7 +181,7 @@ const handleIceCandidate = (ws, message) => {
                         console.log('ICE candidate broadcast from', ws.id, 'to', user.id)
                         user.send(JSON.stringify({
                             type: 'ice-candidate',
-                            candidate: message.data.candidate,
+                            candidate: message.candidate,
                             from: ws.id,
                             to: user.id
                         }))
@@ -191,12 +192,12 @@ const handleIceCandidate = (ws, message) => {
         }
     } else {
         // Send to specific user
-        const targetUser = findUserById(message.data.targetUser)
+        const targetUser = findUserById(message.to || message.targetUser)
         if (targetUser) {
             console.log('ICE candidate from', ws.id, 'to', targetUser.id)
             targetUser.send(JSON.stringify({
                 type: 'ice-candidate',
-                candidate: message.data.candidate,
+                candidate: message.candidate,
                 from: ws.id,
                 to: targetUser.id
             }))

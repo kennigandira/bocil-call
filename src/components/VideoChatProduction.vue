@@ -136,10 +136,10 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, nextTick } from 'vue'
 
 export default {
-  name: 'VideoChat',
+  name: 'VideoChatProduction',
   setup() {
     // Refs for video elements
     const localVideo = ref(null)
@@ -157,17 +157,14 @@ export default {
       peerConnection: null,
       userId: null,
       pollingInterval: null,
-      socket: null, // Added for WebSocket
-      pendingIceCandidates: [], // Added for queuing ICE candidates
-      remoteStream: null, // Store remote stream for later use
-      chatMessages: [], // Chat messages
-      newMessage: '' // Current message being typed
+      pendingIceCandidates: [],
+      remoteStream: null,
+      chatMessages: [],
+      newMessage: ''
     })
 
-    // Computed property for safe user ID access
+    // Computed properties
     const userId = computed(() => state.userId || '')
-    
-    // Computed property to show remote video when we have a peer connection
     const showRemoteVideo = computed(() => {
       return state.isConnected || state.isConnecting || !!state.peerConnection
     })
@@ -177,13 +174,11 @@ export default {
       const urlParams = new URLSearchParams(window.location.search)
       const userIdParam = urlParams.get('user')
       
-      // Only accept "dede" and "kia" as valid user IDs
       if (userIdParam === 'dede' || userIdParam === 'kia') {
         state.userId = userIdParam
         console.log('✅ User ID set to:', state.userId)
         state.statusMessage = 'Ready to chat'
       } else {
-        // Show error for invalid user ID
         state.statusMessage = 'Invalid user ID. Use ?user=dede or ?user=kia'
         console.error('❌ Invalid user ID:', userIdParam)
       }
@@ -200,19 +195,15 @@ export default {
     // Initialize WebRTC
     const initializeWebRTC = () => {
       state.peerConnection = new RTCPeerConnection(rtcConfig)
-      console.debug('boi', state.peerConnection)
       
       // Handle incoming streams
       state.peerConnection.ontrack = (event) => {
         console.log('🎥 Received remote track:', event.track.kind)
-        console.log('📺 Remote video element:', remoteVideo.value)
-        console.log('📺 Remote streams:', event.streams)
         
-        // Try to set the remote video stream
         const setRemoteVideo = () => {
           if (remoteVideo.value && event.streams && event.streams[0]) {
             remoteVideo.value.srcObject = event.streams[0]
-            state.remoteStream = event.streams[0] // Store for later use
+            state.remoteStream = event.streams[0]
             console.log('✅ Remote video stream set')
             return true
           } else {
@@ -221,15 +212,10 @@ export default {
           }
         }
         
-        // Try immediately
         if (!setRemoteVideo()) {
-          // If failed, try again after DOM update
           nextTick(() => {
             if (!setRemoteVideo()) {
-              console.error('❌ Cannot set remote video stream after retry:', {
-                remoteVideo: remoteVideo.value,
-                streams: event.streams
-              })
+              console.error('❌ Cannot set remote video stream after retry')
             }
           })
         }
@@ -239,9 +225,9 @@ export default {
       state.peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
           console.log('🧊 Sending ICE candidate')
-          sendMessage('ice-candidate', {
+          sendHttpMessage('ice-candidate', {
             candidate: event.candidate,
-            targetUser: 'broadcast' // Send to all other users
+            targetUser: 'broadcast'
           })
         }
       }
@@ -264,72 +250,36 @@ export default {
       if (state.peerConnection) {
         const connectionState = state.peerConnection.connectionState
         const iceConnectionState = state.peerConnection.iceConnectionState
-        const signalingState = state.peerConnection.signalingState
 
-        console.log('🔍 Connection Status Update:', {
-          connectionState,
-          iceConnectionState,
-          signalingState,
-          isConnected: state.isConnected,
-          isConnecting: state.isConnecting
-        })
-
-        console.log('🔍 Checking connection condition:', {
-          connectionState,
-          iceConnectionState,
-          condition: connectionState === 'connected' && iceConnectionState === 'connected',
-          currentIsConnected: state.isConnected
-        })
-        
         if (connectionState === 'connected' && iceConnectionState === 'connected') {
-          console.log('✅ Condition met! Setting isConnected to true')
           state.connectionStatus = 'connected'
           state.statusMessage = 'Connected'
           state.isConnected = true
           state.isConnecting = false
           console.log('✅ WebRTC connection established!')
           
-          // Ensure remote video is set if we have streams
+          // Ensure remote video is set
           if (state.peerConnection.getReceivers) {
             const receivers = state.peerConnection.getReceivers()
-            console.log('📺 Checking receivers:', receivers.length)
             const videoReceiver = receivers.find(r => r.track && r.track.kind === 'video')
             if (videoReceiver && videoReceiver.track && remoteVideo.value) {
               const stream = new MediaStream([videoReceiver.track])
               remoteVideo.value.srcObject = stream
               state.remoteStream = stream
-              console.log('✅ Set remote video stream on connection')
             } else if (state.remoteStream && remoteVideo.value) {
-              // Use stored remote stream
               remoteVideo.value.srcObject = state.remoteStream
-              console.log('✅ Set stored remote video stream on connection')
-            } else {
-              console.log('❌ No video receiver or remote video element:', {
-                videoReceiver: !!videoReceiver,
-                hasTrack: videoReceiver?.track,
-                remoteVideo: !!remoteVideo.value,
-                hasRemoteStream: !!state.remoteStream
-              })
             }
           }
         } else if (connectionState === 'connecting' || iceConnectionState === 'checking') {
           state.connectionStatus = 'connecting'
           state.statusMessage = `Connecting... (${connectionState}/${iceConnectionState})`
-          console.log('🔄 WebRTC connecting...')
         } else if (connectionState === 'failed' || iceConnectionState === 'failed') {
           state.connectionStatus = 'failed'
           state.statusMessage = 'Connection Failed'
           state.isConnected = false
           state.isConnecting = false
-          console.log('❌ WebRTC connection failed')
         } else {
-          // Log other states for debugging
           state.statusMessage = `Status: ${connectionState}/${iceConnectionState}`
-          console.log('ℹ️ Other connection state:', {
-            connectionState,
-            iceConnectionState,
-            signalingState
-          })
         }
       }
     }
@@ -343,25 +293,16 @@ export default {
           audio: true
         })
         
-        console.log('✅ Got media stream with tracks:', stream.getTracks().map(t => t.kind))
         state.localStream = stream
         if (localVideo.value) {
           localVideo.value.srcObject = stream
-          console.log('✅ Set local video stream')
         }
         
         // Add tracks to peer connection
         if (state.peerConnection) {
           stream.getTracks().forEach(track => {
-            console.log('➕ Adding track to peer connection:', track.kind)
             state.peerConnection.addTrack(track, stream)
           })
-        }
-        
-        // If we already have a remote description, we need to create a new offer
-        if (state.peerConnection.remoteDescription && state.peerConnection.remoteDescription.type === 'answer') {
-          console.log('🔄 Creating new offer after adding tracks')
-          createOffer(state.userId === 'dede' ? 'kia' : 'dede')
         }
         
         return stream
@@ -372,58 +313,7 @@ export default {
       }
     }
 
-    // Initialize signaling based on environment
-    const initializeSignaling = () => {
-      // Use WebSocket for local development, HTTP polling for production
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        initializeWebSocket()
-      } else {
-        initializeHttpPolling()
-      }
-    }
-
-    // Initialize WebSocket signaling (for local development)
-    const initializeWebSocket = () => {
-      console.log('🔌 Connecting to WebSocket signaling server...')
-      
-      // Connect to local WebSocket server
-      const socket = new WebSocket('ws://localhost:3001')
-      
-      socket.onopen = () => {
-        console.log('✅ WebSocket connected')
-        state.socket = socket
-        
-        // Set the user ID for this connection
-        socket.userId = state.userId
-        
-        // Join the room
-        socket.send(JSON.stringify({
-          type: 'join-room',
-          roomId: 'kids-room',
-          userId: state.userId
-        }))
-      }
-      
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('❌ Error parsing WebSocket message:', error)
-        }
-      }
-      
-      socket.onerror = (error) => {
-        console.error('❌ WebSocket error:', error)
-      }
-      
-      socket.onclose = () => {
-        console.log('🔌 WebSocket disconnected')
-        state.socket = null
-      }
-    }
-
-    // Initialize HTTP polling signaling (for production)
+    // Initialize HTTP polling signaling
     const initializeHttpPolling = () => {
       state.pollingInterval = setInterval(pollMessages, 1000)
       console.log('🔄 Started HTTP polling for signaling')
@@ -452,6 +342,32 @@ export default {
       }
     }
 
+    // Send HTTP message
+    const sendHttpMessage = async (type, data) => {
+      try {
+        const response = await fetch('/api/socket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send-message',
+            roomId: 'kids-room',
+            userId: state.userId,
+            message: {
+              type,
+              from: state.userId,
+              ...data
+            }
+          })
+        })
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+      } catch (error) {
+        console.error('❌ Error sending message:', error)
+      }
+    }
+
     // Handle incoming messages
     const handleMessage = async (message) => {
       console.log('📨 Received message:', message.type)
@@ -460,22 +376,12 @@ export default {
         case 'user-joined':
           if (message.userId !== state.userId) {
             console.log('👋 Friend joined!')
-            console.log('🔍 User ID comparison:', {
-              ourId: state.userId,
-              friendId: message.userId,
-              ourIdFirst: state.userId < message.userId
-            })
             state.statusMessage = 'Friend joined! Creating connection...'
-            
-            // Reset connection state when friend joins
             state.isConnected = false
             state.isConnecting = true
             
-            // Only create offer if our ID comes first alphabetically
-            // This ensures only one user creates the offer
             if (state.userId < message.userId) {
               console.log('📤 Creating offer (our ID comes first)')
-              // Small delay to ensure both users are ready
               setTimeout(() => {
                 createOffer(message.userId)
               }, 100)
@@ -496,11 +402,6 @@ export default {
         case 'answer':
           if (message.to === state.userId) {
             console.log('📨 Received answer from:', message.from)
-            console.log('📋 Answer details:', {
-              from: message.from,
-              hasAnswer: !!message.answer,
-              answerType: message.answer?.type
-            })
             await handleAnswer(message)
           }
           break
@@ -520,398 +421,169 @@ export default {
             state.isConnecting = false
           }
           break
+          
         case 'chat-message':
           if (message.from !== state.userId) {
             console.log('💬 Received chat message from:', message.from)
             addChatMessage(message.from, message.text)
           }
           break
+          
         default:
           console.log('📨 Unknown message type:', message.type)
       }
     }
 
-    // Handle WebSocket messages
-    const handleWebSocketMessage = (message) => {
-      console.log('📨 Received WebSocket message:', message)
-      
-      switch (message.type) {
-        case 'offer':
-          if (message.to === state.userId) {
-            console.log('📨 Received offer from:', message.from)
-            handleOffer(message)
-          }
-          break
-        case 'answer':
-          if (message.to === state.userId) {
-            console.log('📨 Received answer from:', message.from)
-            console.log('📋 Answer details:', {
-              from: message.from,
-              hasAnswer: !!message.answer,
-              answerType: message.answer?.type
-            })
-            handleAnswer(message)
-          }
-          break
-        case 'ice-candidate':
-          if (message.from !== state.userId) {
-            console.log('🧊 Received ICE candidate from:', message.from)
-            handleIceCandidate(message)
-          }
-          break
-        case 'user-joined':
-          if (message.userId !== state.userId) {
-            console.log('👋 Friend joined!')
-            console.log('🔍 User ID comparison:', {
-              ourId: state.userId,
-              friendId: message.userId,
-              ourIdFirst: state.userId < message.userId
-            })
-            state.statusMessage = 'Friend joined! Creating connection...'
-            
-            // Reset connection state when friend joins
-            state.isConnected = false
-            state.isConnecting = true
-            
-            // Only create offer if our ID comes first alphabetically
-            // This ensures only one user creates the offer
-            if (state.userId < message.userId) {
-              console.log('📤 Creating offer (our ID comes first)')
-              // Small delay to ensure both users are ready
-              setTimeout(() => {
-                createOffer(message.userId)
-              }, 100)
-            } else {
-              console.log('⏳ Waiting for offer (friend\'s ID comes first)')
-              state.statusMessage = 'Friend joined! Waiting for connection...'
-            }
-          }
-          break
-        case 'user-left':
-          if (message.userId !== state.userId) {
-            console.log('👋 Friend left')
-            state.statusMessage = 'Friend left the call'
-            state.isConnected = false
-            state.isConnecting = false
-          }
-          break
-        case 'chat-message':
-          if (message.from !== state.userId) {
-            console.log('💬 Received chat message from:', message.from)
-            addChatMessage(message.from, message.text)
-          }
-          break
-        default:
-          console.log('📨 Unknown message type:', message.type)
-      }
-    }
-
-    // Send message to signaling server
-    const sendMessage = async (action, data = {}) => {
-      try {
-        if (state.socket) {
-          state.socket.send(JSON.stringify({
-            type: action,
-            roomId: 'kids-room',
-            userId: state.userId,
-            data
-          }))
-        } else {
-          await fetch('/api/socket', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action,
-              roomId: 'kids-room',
-              userId: state.userId,
-              data
-            })
-          })
-        }
-      } catch (error) {
-        console.error('❌ Error sending message:', error)
-      }
-    }
-
-    // Create and send offer
-    const createOffer = async (targetUser) => {
-      try {
-        // Don't create offer if we're already negotiating
-        if (state.peerConnection.signalingState !== 'stable') {
-          console.log('⏳ Skipping offer creation - already negotiating')
-          return
-        }
-        
-        console.log('📤 Creating offer for user:', targetUser)
-        const offer = await state.peerConnection.createOffer()
-        await state.peerConnection.setLocalDescription(offer)
-        console.log('📤 Sending offer to:', targetUser)
-        
-        await sendMessage('offer', {
-          offer: offer,
-          targetUser: targetUser
-        })
-        
-        console.log('✅ Offer sent successfully, waiting for answer...')
-      } catch (error) {
-        console.error('❌ Error creating offer:', error)
-        // If there's an error, try to recover
-        if (error.name === 'InvalidStateError') {
-          console.log('🔄 Attempting to recover from offer creation error...')
-          try {
-            await state.peerConnection.setLocalDescription({ type: 'rollback' })
-            const offer = await state.peerConnection.createOffer()
-            await state.peerConnection.setLocalDescription(offer)
-            await sendMessage('offer', {
-              offer: offer,
-              targetUser: targetUser
-            })
-            console.log('✅ Offer sent successfully after recovery, waiting for answer...')
-          } catch (recoveryError) {
-            console.error('❌ Failed to recover from offer creation error:', recoveryError)
-          }
-        }
-      }
-    }
-
-    // Handle incoming offer
+    // Handle offer
     const handleOffer = async (message) => {
       try {
-        console.log('📨 Received offer from:', message.from)
-        
-        // If we're already negotiating, we might need to rollback
         if (state.peerConnection.signalingState !== 'stable') {
-          console.log('🔄 Rolling back due to negotiation conflict')
-          try {
-            await state.peerConnection.setLocalDescription({ type: 'rollback' })
-          } catch (rollbackError) {
-            console.log('ℹ️ Rollback failed, continuing...')
-          }
+          console.log('🔄 Signaling state not stable, rolling back...')
+          await Promise.all([
+            state.peerConnection.setLocalDescription({ type: 'rollback' }),
+            state.peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer))
+          ])
+        } else {
+          await state.peerConnection.setRemoteDescription(new RTCSessionDescription(message.offer))
         }
         
-        await state.peerConnection.setRemoteDescription(message.offer)
-        console.log('✅ Set remote description (offer)')
+        console.log('✅ Remote description set')
         
+        // Add any pending ICE candidates
+        while (state.pendingIceCandidates.length > 0) {
+          const candidate = state.pendingIceCandidates.shift()
+          await state.peerConnection.addIceCandidate(candidate)
+          console.log('✅ Added pending ICE candidate')
+        }
+        
+        // Create answer
         const answer = await state.peerConnection.createAnswer()
         await state.peerConnection.setLocalDescription(answer)
-        console.log('📤 Sending answer to:', message.from)
         
-        await sendMessage('answer', {
-          answer: answer,
-          targetUser: message.from
+        console.log('📤 Sending answer')
+        sendHttpMessage('answer', {
+          answer,
+          to: message.from
         })
-
-        // Add pending ICE candidates after remote description is set
-        await addPendingIceCandidates()
       } catch (error) {
         console.error('❌ Error handling offer:', error)
-        // If it's a state error, just log it and continue
-        if (error.name === 'InvalidStateError') {
-          console.log('ℹ️ Offer already processed, continuing...')
-          return
-        }
-        // If there's a negotiation conflict, try to recover
-        if (error.name === 'InvalidAccessError' && error.message.includes('m-lines')) {
-          console.log('🔄 Attempting to recover from negotiation conflict...')
-          try {
-            await state.peerConnection.setLocalDescription({ type: 'rollback' })
-            await state.peerConnection.setRemoteDescription(message.offer)
-            const answer = await state.peerConnection.createAnswer()
-            await state.peerConnection.setLocalDescription(answer)
-            await sendMessage('answer', {
-              answer: answer,
-              targetUser: message.from
-            })
-            await addPendingIceCandidates()
-          } catch (recoveryError) {
-            console.error('❌ Failed to recover from negotiation conflict:', recoveryError)
-          }
-        }
       }
     }
 
-    // Handle incoming answer
+    // Handle answer
     const handleAnswer = async (message) => {
       try {
-        console.log('📨 Received answer from:', message.from)
-        console.log('🔧 Setting remote description with answer...')
-        await state.peerConnection.setRemoteDescription(message.answer)
-        console.log('✅ Set remote description (answer)')
-        console.log('📦 Adding pending ICE candidates...')
-        // Add pending ICE candidates after remote description is set
-        await addPendingIceCandidates()
-        console.log('✅ Answer handling completed')
+        if (state.peerConnection.signalingState === 'have-local-offer') {
+          await state.peerConnection.setRemoteDescription(new RTCSessionDescription(message.answer))
+          console.log('✅ Remote description set from answer')
+          
+          // Add any pending ICE candidates
+          while (state.pendingIceCandidates.length > 0) {
+            const candidate = state.pendingIceCandidates.shift()
+            await state.peerConnection.addIceCandidate(candidate)
+            console.log('✅ Added pending ICE candidate')
+          }
+        } else {
+          console.log('⚠️ Ignoring answer - not in correct signaling state')
+        }
       } catch (error) {
         console.error('❌ Error handling answer:', error)
-        // If it's a state error, just log it and continue
-        if (error.name === 'InvalidStateError') {
-          console.log('ℹ️ Answer already processed, continuing...')
-        }
       }
     }
 
-    // Handle incoming ICE candidate
+    // Handle ICE candidate
     const handleIceCandidate = async (message) => {
       try {
-        // Only add ICE candidates if we have a remote description
         if (state.peerConnection.remoteDescription) {
-          await state.peerConnection.addIceCandidate(message.candidate)
-          console.log('✅ Added ICE candidate')
+          await state.peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate))
+          console.log('✅ ICE candidate added')
         } else {
-          console.log('⏳ Queuing ICE candidate (waiting for remote description)')
-          // Queue the candidate to add later
-          if (!state.pendingIceCandidates) {
-            state.pendingIceCandidates = []
-          }
-          state.pendingIceCandidates.push(message.candidate)
+          state.pendingIceCandidates.push(new RTCIceCandidate(message.candidate))
+          console.log('⏳ ICE candidate queued')
         }
       } catch (error) {
         console.error('❌ Error adding ICE candidate:', error)
       }
     }
 
-    // Add pending ICE candidates after remote description is set
-    const addPendingIceCandidates = async () => {
-      if (state.pendingIceCandidates && state.pendingIceCandidates.length > 0) {
-        console.log('📦 Adding pending ICE candidates:', state.pendingIceCandidates.length)
-        for (const candidate of state.pendingIceCandidates) {
-          try {
-            await state.peerConnection.addIceCandidate(candidate)
-            console.log('✅ Added pending ICE candidate')
-          } catch (error) {
-            console.error('❌ Error adding pending ICE candidate:', error)
-          }
-        }
-        state.pendingIceCandidates = []
+    // Create offer
+    const createOffer = async (targetUserId) => {
+      try {
+        console.log('📤 Creating offer for:', targetUserId)
+        
+        const offer = await state.peerConnection.createOffer()
+        await state.peerConnection.setLocalDescription(offer)
+        
+        console.log('📤 Sending offer')
+        sendHttpMessage('offer', {
+          offer,
+          to: targetUserId
+        })
+      } catch (error) {
+        console.error('❌ Error creating offer:', error)
       }
     }
 
-    // Start the call
+    // Start call
     const startCall = async () => {
       try {
-        // Check if user ID is valid
-        if (!state.userId) {
-          state.statusMessage = 'Invalid user ID. Use ?user=dede or ?user=kia'
-          return
-        }
-        
-        console.log('🚀 Starting call with user ID:', state.userId)
-        
-        // Reset connection state
-        state.isConnected = false
         state.isConnecting = true
-        state.statusMessage = 'Getting ready...'
+        state.statusMessage = 'Starting call...'
         
-        // Clear pending ICE candidates
-        state.pendingIceCandidates = []
-        
-        // Close existing connections
-        if (state.peerConnection) {
-          state.peerConnection.close()
-        }
-        if (state.socket) {
-          state.socket.close()
-        }
-        
-        // Initialize WebRTC and signaling
+        // Initialize WebRTC
         initializeWebRTC()
-        initializeSignaling()
         
-        // Get user media first
+        // Get user media
         await getUserMedia()
         
-        // Join the room after getting media
-        await sendMessage('join', {})
+        // Initialize HTTP polling
+        initializeHttpPolling()
         
-        state.statusMessage = 'Waiting for friend...'
-        
+        console.log('✅ Call started')
       } catch (error) {
-        console.error('Error starting call:', error)
+        console.error('❌ Error starting call:', error)
         state.isConnecting = false
         state.statusMessage = 'Failed to start call'
       }
     }
 
-    // End the call
+    // End call
     const endCall = () => {
+      console.log('📞 Ending call')
+      
+      // Stop local stream
       if (state.localStream) {
         state.localStream.getTracks().forEach(track => track.stop())
         state.localStream = null
       }
       
+      // Close peer connection
       if (state.peerConnection) {
         state.peerConnection.close()
         state.peerConnection = null
       }
       
-      // Clear chat messages
-      state.chatMessages = []
-      state.newMessage = ''
-      
+      // Stop polling
       if (state.pollingInterval) {
         clearInterval(state.pollingInterval)
         state.pollingInterval = null
       }
       
-      if (state.socket) {
-        state.socket.close()
-        state.socket = null
-      }
-      
-      // Leave the room
-      sendMessage('leave', {})
-      
+      // Reset state
       state.isConnected = false
       state.isConnecting = false
       state.connectionStatus = 'disconnected'
-      state.statusMessage = 'Call ended'
+      state.statusMessage = 'Disconnected'
+      state.pendingIceCandidates = []
+      state.remoteStream = null
       
       // Clear video elements
-      if (localVideo.value) localVideo.value.srcObject = null
-      if (remoteVideo.value) remoteVideo.value.srcObject = null
-    }
-
-    // Chat functions
-    const addChatMessage = (sender, text) => {
-      state.chatMessages.push({
-        sender,
-        text,
-        timestamp: new Date()
-      })
-      
-      // Scroll to bottom of chat
-      nextTick(() => {
-        const chatMessages = document.querySelector('.chat-messages')
-        if (chatMessages) {
-          chatMessages.scrollTop = chatMessages.scrollHeight
-        }
-      })
-    }
-
-    const sendChatMessage = async () => {
-      console.debug('====', {state})
-      if (!state.newMessage.trim() || !state.isConnected) return
-      const messageText = state.newMessage.trim()
-      state.newMessage = ''
-
-      
-      // Add message to local chat
-      addChatMessage(state.userId, messageText)
-      
-      // Send message to signaling server
-      try {
-        await sendMessage('chat-message', {
-          text: messageText,
-          targetUser: 'broadcast' // Send to all users in room
-        })
-        console.log('💬 Sent chat message:', messageText)
-      } catch (error) {
-        console.error('❌ Error sending chat message:', error)
+      if (localVideo.value) {
+        localVideo.value.srcObject = null
       }
-    }
-
-    const formatTime = (timestamp) => {
-      return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      if (remoteVideo.value) {
+        remoteVideo.value.srcObject = null
+      }
     }
 
     // Toggle mute
@@ -936,35 +608,52 @@ export default {
       }
     }
 
-    // Cleanup on unmount
-    onUnmounted(() => {
-      endCall()
-      // Close WebSocket connection
-      if (state.socket) {
-        state.socket.close()
-      }
-    })
+    // Chat functions
+    const addChatMessage = (sender, text) => {
+      state.chatMessages.push({
+        sender,
+        text,
+        timestamp: new Date()
+      })
+      
+      // Scroll to bottom
+      nextTick(() => {
+        const chatMessages = document.querySelector('.chat-messages')
+        if (chatMessages) {
+          chatMessages.scrollTop = chatMessages.scrollHeight
+        }
+      })
+    }
 
-    // Initialize user ID when component mounts
+    const sendChatMessage = () => {
+      if (state.newMessage.trim() && state.isConnected) {
+        sendHttpMessage('chat-message', {
+          text: state.newMessage.trim(),
+          targetUser: 'broadcast'
+        })
+        
+        addChatMessage(state.userId, state.newMessage.trim())
+        state.newMessage = ''
+      }
+    }
+
+    const formatTime = (timestamp) => {
+      return new Date(timestamp).toLocaleTimeString()
+    }
+
+    // Lifecycle hooks
     onMounted(() => {
       initializeUserId()
     })
-    
-    // Watch for remote video element availability
-    watch(remoteVideo, (newElement) => {
-      if (newElement && state.remoteStream) {
-        console.log('📺 Remote video element became available, setting stream')
-        newElement.srcObject = state.remoteStream
-      }
+
+    onUnmounted(() => {
+      endCall()
     })
 
     return {
       // Refs
       localVideo,
       remoteVideo,
-      
-      // Computed
-      showRemoteVideo,
       
       // State
       isConnected: computed(() => state.isConnected),
@@ -973,9 +662,8 @@ export default {
       isVideoOn: computed(() => state.isVideoOn),
       connectionStatus: computed(() => state.connectionStatus),
       statusMessage: computed(() => state.statusMessage),
-      userId, // Add computed userId
-      
-      // Chat state
+      userId,
+      showRemoteVideo,
       chatMessages: computed(() => state.chatMessages),
       newMessage: computed({
         get: () => state.newMessage,
@@ -993,6 +681,7 @@ export default {
   }
 }
 </script>
+
 
 <style scoped>
 .video-chat {
