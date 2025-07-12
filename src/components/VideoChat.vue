@@ -139,7 +139,7 @@ export default {
       // Handle ICE candidates
       state.peerConnection.onicecandidate = (event) => {
         if (event.candidate && state.socket) {
-          // Find the target user (the other user in the room)
+          console.log('🧊 Sending ICE candidate')
           state.socket.emit('ice-candidate', {
             candidate: event.candidate,
             targetUser: 'broadcast' // Will be handled by server to send to all other users in room
@@ -184,26 +184,30 @@ export default {
     // Get user media
     const getUserMedia = async () => {
       try {
+        console.log('🎥 Requesting camera and microphone access...')
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         })
         
+        console.log('✅ Got media stream with tracks:', stream.getTracks().map(t => t.kind))
         state.localStream = stream
         if (localVideo.value) {
           localVideo.value.srcObject = stream
+          console.log('✅ Set local video stream')
         }
         
         // Add tracks to peer connection
         if (state.peerConnection) {
           stream.getTracks().forEach(track => {
+            console.log('➕ Adding track to peer connection:', track.kind)
             state.peerConnection.addTrack(track, stream)
           })
         }
         
         return stream
       } catch (error) {
-        console.error('Error accessing media devices:', error)
+        console.error('❌ Error accessing media devices:', error)
         alert('Please allow camera and microphone access to use the video chat.')
         throw error
       }
@@ -228,46 +232,56 @@ export default {
       // Handle WebRTC signaling
       state.socket.on('offer', async (data) => {
         try {
+          console.log('📨 Received offer from:', data.from)
           await state.peerConnection.setRemoteDescription(data.offer)
+          console.log('✅ Set remote description (offer)')
+          
           const answer = await state.peerConnection.createAnswer()
           await state.peerConnection.setLocalDescription(answer)
+          console.log('📤 Sending answer to:', data.from)
+          
           state.socket.emit('answer', {
             answer: answer,
             targetUser: data.from
           })
         } catch (error) {
-          console.error('Error handling offer:', error)
+          console.error('❌ Error handling offer:', error)
         }
       })
 
       state.socket.on('answer', async (data) => {
         try {
+          console.log('📨 Received answer from:', data.from)
           await state.peerConnection.setRemoteDescription(data.answer)
+          console.log('✅ Set remote description (answer)')
         } catch (error) {
-          console.error('Error handling answer:', error)
+          console.error('❌ Error handling answer:', error)
         }
       })
 
       state.socket.on('ice-candidate', async (data) => {
         try {
+          console.log('🧊 Received ICE candidate from:', data.from)
           await state.peerConnection.addIceCandidate(data.candidate)
+          console.log('✅ Added ICE candidate')
         } catch (error) {
-          console.error('Error adding ICE candidate:', error)
+          console.error('❌ Error adding ICE candidate:', error)
         }
       })
 
       // Handle create offer request
       state.socket.on('create-offer', async (data) => {
         try {
-          console.log('Creating offer for user:', data.targetUser)
+          console.log('📤 Creating offer for user:', data.targetUser)
           const offer = await state.peerConnection.createOffer()
           await state.peerConnection.setLocalDescription(offer)
+          console.log('📤 Sending offer to:', data.targetUser)
           state.socket.emit('offer', {
             offer: offer,
             targetUser: data.targetUser
           })
         } catch (error) {
-          console.error('Error creating offer:', error)
+          console.error('❌ Error creating offer:', error)
         }
       })
 
