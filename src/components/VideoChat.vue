@@ -66,6 +66,44 @@
       </div>
     </div>
 
+    <!-- Chat Interface -->
+    <div class="chat-container" v-if="isConnected || isConnecting">
+      <div class="chat-header">
+        <h3>💬 Chat</h3>
+        <span class="chat-status">{{ chatMessages.length }} messages</span>
+      </div>
+      
+      <div class="chat-messages" ref="chatMessages">
+        <div 
+          v-for="(message, index) in chatMessages" 
+          :key="index"
+          class="chat-message"
+          :class="{ 'own-message': message.sender === userId }"
+        >
+          <div class="message-sender">{{ message.sender }}</div>
+          <div class="message-text">{{ message.text }}</div>
+          <div class="message-time">{{ formatTime(message.timestamp) }}</div>
+        </div>
+      </div>
+      
+      <div class="chat-input-container">
+        <input 
+          v-model="newMessage" 
+          @keyup.enter="sendChatMessage"
+          placeholder="Type a message..."
+          class="chat-input"
+          :disabled="!isConnected"
+        />
+        <button 
+          @click="sendChatMessage" 
+          class="send-button"
+          :disabled="!isConnected || !newMessage.trim()"
+        >
+          📤
+        </button>
+      </div>
+    </div>
+
     <!-- Control Buttons -->
     <div class="controls" v-if="isConnected || isConnecting">
       <button 
@@ -121,7 +159,9 @@ export default {
       pollingInterval: null,
       socket: null, // Added for WebSocket
       pendingIceCandidates: [], // Added for queuing ICE candidates
-      remoteStream: null // Store remote stream for later use
+      remoteStream: null, // Store remote stream for later use
+      chatMessages: [], // Chat messages
+      newMessage: '' // Current message being typed
     })
 
     // Computed property for safe user ID access
@@ -224,17 +264,32 @@ export default {
       if (state.peerConnection) {
         const connectionState = state.peerConnection.connectionState
         const iceConnectionState = state.peerConnection.iceConnectionState
+        const signalingState = state.peerConnection.signalingState
 
-        console.log('Connection state:', connectionState, 'ICE state:', iceConnectionState)
+        console.log('🔍 Connection Status Update:', {
+          connectionState,
+          iceConnectionState,
+          signalingState,
+          isConnected: state.isConnected,
+          isConnecting: state.isConnecting
+        })
 
+        console.log('🔍 Checking connection condition:', {
+          connectionState,
+          iceConnectionState,
+          condition: connectionState === 'connected' && iceConnectionState === 'connected',
+          currentIsConnected: state.isConnected
+        })
+        
         if (connectionState === 'connected' && iceConnectionState === 'connected') {
+          console.log('✅ Condition met! Setting isConnected to true')
           state.connectionStatus = 'connected'
           state.statusMessage = 'Connected'
           state.isConnected = true
           state.isConnecting = false
           console.log('✅ WebRTC connection established!')
           
-                            // Ensure remote video is set if we have streams
+          // Ensure remote video is set if we have streams
           if (state.peerConnection.getReceivers) {
             const receivers = state.peerConnection.getReceivers()
             console.log('📺 Checking receivers:', receivers.length)
@@ -259,7 +314,7 @@ export default {
           }
         } else if (connectionState === 'connecting' || iceConnectionState === 'checking') {
           state.connectionStatus = 'connecting'
-          state.statusMessage = 'Connecting...'
+          state.statusMessage = `Connecting... (${connectionState}/${iceConnectionState})`
           console.log('🔄 WebRTC connecting...')
         } else if (connectionState === 'failed' || iceConnectionState === 'failed') {
           state.connectionStatus = 'failed'
@@ -267,6 +322,14 @@ export default {
           state.isConnected = false
           state.isConnecting = false
           console.log('❌ WebRTC connection failed')
+        } else {
+          // Log other states for debugging
+          state.statusMessage = `Status: ${connectionState}/${iceConnectionState}`
+          console.log('ℹ️ Other connection state:', {
+            connectionState,
+            iceConnectionState,
+            signalingState
+          })
         }
       }
     }
@@ -440,6 +503,7 @@ export default {
     // Handle WebSocket messages
     const handleWebSocketMessage = (message) => {
       console.log('📨 Received WebSocket message:', message)
+      
       switch (message.type) {
         case 'offer':
           if (message.to === state.userId) {
@@ -485,6 +549,12 @@ export default {
             state.statusMessage = 'Friend left the call'
             state.isConnected = false
             state.isConnecting = false
+          }
+          break
+        case 'chat-message':
+          if (message.from !== state.userId) {
+            console.log('💬 Received chat message from:', message.from)
+            addChatMessage(message.from, message.text)
           }
           break
         default:
@@ -567,6 +637,11 @@ export default {
         await addPendingIceCandidates()
       } catch (error) {
         console.error('❌ Error handling offer:', error)
+        // If it's a state error, just log it and continue
+        if (error.name === 'InvalidStateError') {
+          console.log('ℹ️ Offer already processed, continuing...')
+          return
+        }
         // If there's a negotiation conflict, try to recover
         if (error.name === 'InvalidAccessError' && error.message.includes('m-lines')) {
           console.log('🔄 Attempting to recover from negotiation conflict...')
@@ -596,6 +671,10 @@ export default {
         await addPendingIceCandidates()
       } catch (error) {
         console.error('❌ Error handling answer:', error)
+        // If it's a state error, just log it and continue
+        if (error.name === 'InvalidStateError') {
+          console.log('ℹ️ Answer already processed, continuing...')
+        }
       }
     }
 
@@ -644,8 +723,18 @@ export default {
           return
         }
         
+        // Reset connection state
+        state.isConnected = false
         state.isConnecting = true
         state.statusMessage = 'Getting ready...'
+        
+        // Close existing connections
+        if (state.peerConnection) {
+          state.peerConnection.close()
+        }
+        if (state.socket) {
+          state.socket.close()
+        }
         
         // Initialize WebRTC and signaling
         initializeWebRTC()
@@ -678,6 +767,10 @@ export default {
         state.peerConnection = null
       }
       
+      // Clear chat messages
+      state.chatMessages = []
+      state.newMessage = ''
+      
       if (state.pollingInterval) {
         clearInterval(state.pollingInterval)
         state.pollingInterval = null
@@ -699,6 +792,49 @@ export default {
       // Clear video elements
       if (localVideo.value) localVideo.value.srcObject = null
       if (remoteVideo.value) remoteVideo.value.srcObject = null
+    }
+
+    // Chat functions
+    const addChatMessage = (sender, text) => {
+      state.chatMessages.push({
+        sender,
+        text,
+        timestamp: new Date()
+      })
+      
+      // Scroll to bottom of chat
+      nextTick(() => {
+        const chatMessages = document.querySelector('.chat-messages')
+        if (chatMessages) {
+          chatMessages.scrollTop = chatMessages.scrollHeight
+        }
+      })
+    }
+
+    const sendChatMessage = async () => {
+      console.debug('====', {state})
+      if (!state.newMessage.trim() || !state.isConnected) return
+      const messageText = state.newMessage.trim()
+      state.newMessage = ''
+
+      
+      // Add message to local chat
+      addChatMessage(state.userId, messageText)
+      
+      // Send message to signaling server
+      try {
+        await sendMessage('chat-message', {
+          text: messageText,
+          targetUser: 'broadcast' // Send to all users in room
+        })
+        console.log('💬 Sent chat message:', messageText)
+      } catch (error) {
+        console.error('❌ Error sending chat message:', error)
+      }
+    }
+
+    const formatTime = (timestamp) => {
+      return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
     // Toggle mute
@@ -726,6 +862,10 @@ export default {
     // Cleanup on unmount
     onUnmounted(() => {
       endCall()
+      // Close WebSocket connection
+      if (state.socket) {
+        state.socket.close()
+      }
     })
 
     // Initialize user ID when component mounts
@@ -750,19 +890,28 @@ export default {
       showRemoteVideo,
       
       // State
-      isConnected: ref(state.isConnected),
-      isConnecting: ref(state.isConnecting),
-      isMuted: ref(state.isMuted),
-      isVideoOn: ref(state.isVideoOn),
-      connectionStatus: ref(state.connectionStatus),
-      statusMessage: ref(state.statusMessage),
+      isConnected: computed(() => state.isConnected),
+      isConnecting: computed(() => state.isConnecting),
+      isMuted: computed(() => state.isMuted),
+      isVideoOn: computed(() => state.isVideoOn),
+      connectionStatus: computed(() => state.connectionStatus),
+      statusMessage: computed(() => state.statusMessage),
       userId, // Add computed userId
+      
+      // Chat state
+      chatMessages: computed(() => state.chatMessages),
+      newMessage: computed({
+        get: () => state.newMessage,
+        set: (value) => { state.newMessage = value }
+      }),
       
       // Methods
       startCall,
       endCall,
       toggleMute,
-      toggleVideo
+      toggleVideo,
+      sendChatMessage,
+      formatTime
     }
   }
 }
@@ -934,6 +1083,126 @@ export default {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+.chat-container {
+  background: #f8f9fa;
+  border-top: 1px solid #e9ecef;
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+}
+
+.chat-header {
+  padding: 0.5rem 1rem;
+  background: #e9ecef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.chat-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #495057;
+}
+
+.chat-status {
+  font-size: 0.8rem;
+  color: #6c757d;
+}
+
+.chat-messages {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-message {
+  background: white;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  max-width: 80%;
+}
+
+.chat-message.own-message {
+  align-self: flex-end;
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.message-sender {
+  font-size: 0.8rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.own-message .message-sender {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.message-text {
+  margin-bottom: 0.25rem;
+  word-wrap: break-word;
+}
+
+.message-time {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.own-message .message-time {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.chat-input-container {
+  padding: 0.5rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  border-top: 1px solid #e9ecef;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.chat-input:disabled {
+  background: #f8f9fa;
+  color: #6c757d;
+}
+
+.send-button {
+  padding: 0.5rem 1rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.send-button:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.send-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
 }
 
 .controls {

@@ -52,6 +52,9 @@ const handleMessage = (ws, message) => {
         case 'ice-candidate':
             handleIceCandidate(ws, message)
             break
+        case 'chat-message':
+            handleChatMessage(ws, message)
+            break
     }
 }
 
@@ -128,6 +131,41 @@ const handleAnswer = (ws, message) => {
             from: ws.id,
             to: targetUser.id
         }))
+    }
+}
+
+// Handle chat messages
+const handleChatMessage = (ws, message) => {
+    if (message.data.targetUser === 'broadcast') {
+        // Broadcast to all other users in the same room
+        for (const [roomId, room] of rooms.entries()) {
+            if (room.has(ws)) {
+                room.forEach(user => {
+                    if (user !== ws) {
+                        console.log('Chat message from', ws.id, 'to', user.id, ':', message.data.text)
+                        user.send(JSON.stringify({
+                            type: 'chat-message',
+                            text: message.data.text,
+                            from: ws.id,
+                            to: user.id
+                        }))
+                    }
+                })
+                break
+            }
+        }
+    } else {
+        // Send to specific user
+        const targetUser = findUserById(message.data.targetUser)
+        if (targetUser) {
+            console.log('Chat message from', ws.id, 'to', targetUser.id, ':', message.data.text)
+            targetUser.send(JSON.stringify({
+                type: 'chat-message',
+                text: message.data.text,
+                from: ws.id,
+                to: targetUser.id
+            }))
+        }
     }
 }
 
