@@ -93,12 +93,12 @@ function handleOffer(res, roomId, userId, data) {
         room.messages.push({
             type: 'offer',
             from: userId,
-            to: data.targetUser,
-            offer: data.offer,
+            to: data.to,
+            sdp: data.sdp,
             timestamp: Date.now()
         })
+        console.log(`[API] Offer stored from ${userId} to ${data.to} in room ${roomId}`)
     }
-
     res.json({ success: true })
 }
 
@@ -108,12 +108,12 @@ function handleAnswer(res, roomId, userId, data) {
         room.messages.push({
             type: 'answer',
             from: userId,
-            to: data.targetUser,
-            answer: data.answer,
+            to: data.to,
+            sdp: data.sdp,
             timestamp: Date.now()
         })
+        console.log(`[API] Answer stored from ${userId} to ${data.to} in room ${roomId}`)
     }
-
     res.json({ success: true })
 }
 
@@ -123,12 +123,12 @@ function handleIceCandidate(res, roomId, userId, data) {
         room.messages.push({
             type: 'ice-candidate',
             from: userId,
-            to: data.to, // Include the target user
+            to: data.to || undefined,
             candidate: data.candidate,
             timestamp: Date.now()
         })
+        console.log(`[API] ICE candidate stored from ${userId} to ${data.to || 'broadcast'} in room ${roomId}`)
     }
-
     res.json({ success: true })
 }
 
@@ -149,6 +149,7 @@ function handleChatMessage(res, roomId, userId, data) {
 function handleGetMessages(res, roomId, userId) {
     const room = rooms.get(roomId)
     if (!room) {
+        console.log(`[API] No room found for ${roomId} when ${userId} polled`)
         res.json({ messages: [] })
         return
     }
@@ -159,7 +160,21 @@ function handleGetMessages(res, roomId, userId) {
         msg.to === undefined || // Include broadcast messages (like ICE candidates)
         (msg.type === 'user-joined' && msg.userId !== userId) ||
         (msg.type === 'user-left' && msg.userId !== userId) ||
-        (msg.type === 'chat-message' && msg.from !== userId) // Include chat messages from others
+        (msg.type === 'chat-message' && msg.from !== userId)
+    )
+    if (userMessages.length > 0) {
+        console.log(`[API] Delivering ${userMessages.length} messages to ${userId} in room ${roomId}:`, userMessages.map(m => m.type))
+    }
+
+    // Remove delivered messages (for this user) from the queue
+    room.messages = room.messages.filter(msg =>
+        !(
+            msg.to === userId ||
+            msg.to === undefined ||
+            (msg.type === 'user-joined' && msg.userId !== userId) ||
+            (msg.type === 'user-left' && msg.userId !== userId) ||
+            (msg.type === 'chat-message' && msg.from !== userId)
+        )
     )
 
     res.json({ messages: userMessages })

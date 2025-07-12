@@ -407,7 +407,8 @@ export default {
         } else if (type === 'ice-candidate') {
           action = 'ice-candidate'
           messageData = {
-            candidate: data.candidate
+            candidate: data.candidate,
+            to: data.to
           }
         } else if (type === 'chat-message') {
           action = 'chat-message'
