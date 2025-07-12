@@ -215,7 +215,9 @@ export default {
 
     // Initialize socket connection
     const initializeSocket = () => {
-      const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001'
+      // Use production API endpoint for Vercel deployment
+      const socketUrl = import.meta.env.VITE_SOCKET_URL || 
+        (window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/api/socket')
       state.socket = io(socketUrl)
 
       state.socket.on('connect', () => {

@@ -5,9 +5,10 @@ const ioHandler = (req, res) => {
         const io = new Server(res.socket.server, {
             cors: {
                 origin: process.env.NODE_ENV === 'production'
-                    ? ['https://your-domain.vercel.app']
+                    ? ['https://bocil-call-fc27.vercel.app', 'https://*.vercel.app']
                     : ['http://localhost:3000'],
-                methods: ['GET', 'POST']
+                methods: ['GET', 'POST'],
+                credentials: true
             }
         })
 
@@ -15,7 +16,7 @@ const ioHandler = (req, res) => {
         const rooms = new Map()
 
         io.on('connection', (socket) => {
-            console.log('User connected:', socket.id)
+            console.log('User connected:', socket.id, 'from:', req.headers.origin)
 
             // Join a room
             socket.on('join-room', (roomId) => {
