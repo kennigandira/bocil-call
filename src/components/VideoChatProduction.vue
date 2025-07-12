@@ -332,13 +332,17 @@ export default {
     }
 
     // Initialize HTTP polling signaling
-    const initializeHttpPolling = () => {
+    const initializeHttpPolling = async () => {
       // First join the room
-      joinRoom()
-      
-      // Then start polling
-      state.pollingInterval = setInterval(pollMessages, 1000)
-      console.log('🔄 Started HTTP polling for signaling')
+      const joined = await joinRoom()
+      if (joined) {
+        // Then start polling
+        if (state.pollingInterval) clearInterval(state.pollingInterval)
+        state.pollingInterval = setInterval(pollMessages, 1000)
+        console.log('🔄 Started HTTP polling for signaling')
+      } else {
+        console.error('❌ Failed to join room, will not start polling')
+      }
     }
 
     // Join room
@@ -353,11 +357,12 @@ export default {
             userId: state.userId
           })
         })
-        
         const data = await response.json()
         console.log('✅ Joined room:', data)
+        return data && data.success
       } catch (error) {
         console.error('❌ Error joining room:', error)
+        return false
       }
     }
 
@@ -373,12 +378,16 @@ export default {
             userId: state.userId
           })
         })
-        
         const data = await response.json()
-        
-        if (data.messages) {
+        if (data && data.messages) {
           console.log('📨 Polled messages:', data.messages.length)
           data.messages.forEach(handleMessage)
+        } else if (data && data.error && data.error.includes('No room found')) {
+          // Room was deleted, stop polling and re-join
+          console.warn('⚠️ Room not found, rejoining...')
+          if (state.pollingInterval) clearInterval(state.pollingInterval)
+          await joinRoom()
+          state.pollingInterval = setInterval(pollMessages, 1000)
         }
       } catch (error) {
         console.error('❌ Error polling messages:', error)
@@ -605,8 +614,8 @@ export default {
         // Get user media
         await getUserMedia()
         
-        // Initialize HTTP polling
-        initializeHttpPolling()
+        // Initialize HTTP polling (now waits for join success)
+        await initializeHttpPolling()
         
         console.log('✅ Call started')
       } catch (error) {
