@@ -123,6 +123,7 @@ function handleIceCandidate(res, roomId, userId, data) {
         room.messages.push({
             type: 'ice-candidate',
             from: userId,
+            to: data.to, // Include the target user
             candidate: data.candidate,
             timestamp: Date.now()
         })
@@ -155,8 +156,10 @@ function handleGetMessages(res, roomId, userId) {
     // Get messages for this user
     const userMessages = room.messages.filter(msg =>
         msg.to === userId ||
+        msg.to === undefined || // Include broadcast messages (like ICE candidates)
         (msg.type === 'user-joined' && msg.userId !== userId) ||
-        (msg.type === 'user-left' && msg.userId !== userId)
+        (msg.type === 'user-left' && msg.userId !== userId) ||
+        (msg.type === 'chat-message' && msg.from !== userId) // Include chat messages from others
     )
 
     res.json({ messages: userMessages })

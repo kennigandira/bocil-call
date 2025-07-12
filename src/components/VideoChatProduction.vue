@@ -222,20 +222,22 @@ export default {
         }
       }
 
-      // Handle ICE candidates
-      state.peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          console.log('🧊 Sending ICE candidate')
-          // Find the other user in the room
-          const otherUser = getOtherUserInRoom()
-          if (otherUser) {
-            sendHttpMessage('ice-candidate', {
-              candidate: event.candidate,
-              to: otherUser
-            })
+              // Handle ICE candidates
+        state.peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log('🧊 Sending ICE candidate')
+            // Find the other user in the room
+            const otherUser = getOtherUserInRoom()
+            if (otherUser) {
+              sendHttpMessage('ice-candidate', {
+                candidate: event.candidate,
+                to: otherUser
+              })
+            } else {
+              console.log('⚠️ No target user found for ICE candidate')
+            }
           }
         }
-      }
 
       // Handle connection state changes
       state.peerConnection.onconnectionstatechange = () => {
@@ -375,6 +377,7 @@ export default {
         const data = await response.json()
         
         if (data.messages) {
+          console.log('📨 Polled messages:', data.messages.length)
           data.messages.forEach(handleMessage)
         }
       } catch (error) {
@@ -473,7 +476,7 @@ export default {
           
         case 'ice-candidate':
           if (message.from !== state.userId) {
-            console.log('🧊 Received ICE candidate from:', message.from)
+            console.log('🧊 Received ICE candidate from:', message.from, 'to:', message.to)
             await handleIceCandidate(message)
           }
           break
