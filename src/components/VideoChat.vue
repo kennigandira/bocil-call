@@ -129,8 +129,10 @@ export default {
       
       // Handle incoming streams
       state.peerConnection.ontrack = (event) => {
+        console.log('🎥 Received remote track:', event.track.kind)
         if (remoteVideo.value) {
           remoteVideo.value.srcObject = event.streams[0]
+          console.log('✅ Remote video stream set')
         }
       }
 
@@ -157,19 +159,24 @@ export default {
         const connectionState = state.peerConnection.connectionState
         const iceConnectionState = state.peerConnection.iceConnectionState
 
+        console.log('Connection state:', connectionState, 'ICE state:', iceConnectionState)
+
         if (connectionState === 'connected' && iceConnectionState === 'connected') {
           state.connectionStatus = 'connected'
           state.statusMessage = 'Connected'
           state.isConnected = true
           state.isConnecting = false
+          console.log('✅ WebRTC connection established!')
         } else if (connectionState === 'connecting' || iceConnectionState === 'checking') {
           state.connectionStatus = 'connecting'
           state.statusMessage = 'Connecting...'
+          console.log('🔄 WebRTC connecting...')
         } else if (connectionState === 'failed' || iceConnectionState === 'failed') {
           state.connectionStatus = 'failed'
           state.statusMessage = 'Connection Failed'
           state.isConnected = false
           state.isConnecting = false
+          console.log('❌ WebRTC connection failed')
         }
       }
     }
@@ -252,6 +259,7 @@ export default {
       // Handle create offer request
       state.socket.on('create-offer', async (data) => {
         try {
+          console.log('Creating offer for user:', data.targetUser)
           const offer = await state.peerConnection.createOffer()
           await state.peerConnection.setLocalDescription(offer)
           state.socket.emit('offer', {
@@ -267,6 +275,12 @@ export default {
       state.socket.on('user-joined-room', (data) => {
         console.log('New user joined room:', data.newUserId)
         state.statusMessage = 'Friend joined! Creating connection...'
+      })
+
+      // Handle user joined (when someone else joins)
+      state.socket.on('user-joined', (data) => {
+        console.log('Another user joined:', data.userId)
+        state.statusMessage = 'Friend joined! Waiting for connection...'
       })
 
       // Handle room events

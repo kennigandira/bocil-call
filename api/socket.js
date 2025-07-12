@@ -31,15 +31,14 @@ const ioHandler = (req, res) => {
                 console.log(`User ${socket.id} joined room ${roomId}`)
                 console.log(`Room ${roomId} now has ${room.size} users`)
 
-                // Notify other users in the room
-                socket.to(roomId).emit('user-joined', { userId: socket.id })
-
                 // If there are already users in the room, start the connection process
                 if (room.size > 1) {
                     // Get the first user in the room (excluding the new user)
                     const otherUsers = Array.from(room).filter(id => id !== socket.id)
                     if (otherUsers.length > 0) {
                         const targetUser = otherUsers[0]
+
+                        console.log(`Starting connection between ${socket.id} and ${targetUser}`)
 
                         // Notify the new user to create an offer
                         socket.emit('create-offer', { targetUser })
@@ -49,6 +48,9 @@ const ioHandler = (req, res) => {
                             newUserId: socket.id
                         })
                     }
+                } else {
+                    // First user in room, notify them
+                    socket.emit('user-joined', { userId: socket.id })
                 }
             })
 
