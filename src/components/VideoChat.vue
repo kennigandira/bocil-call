@@ -462,6 +462,11 @@ export default {
         case 'user-joined':
           if (message.userId !== state.userId) {
             console.log('👋 Friend joined!')
+            console.log('🔍 User ID comparison:', {
+              ourId: state.userId,
+              friendId: message.userId,
+              ourIdFirst: state.userId < message.userId
+            })
             state.statusMessage = 'Friend joined! Creating connection...'
             // Only create offer if our ID comes first alphabetically
             // This ensures only one user creates the offer
