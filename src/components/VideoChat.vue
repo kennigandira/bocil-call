@@ -532,11 +532,19 @@ export default {
               ourIdFirst: state.userId < message.userId
             })
             state.statusMessage = 'Friend joined! Creating connection...'
+            
+            // Reset connection state when friend joins
+            state.isConnected = false
+            state.isConnecting = true
+            
             // Only create offer if our ID comes first alphabetically
             // This ensures only one user creates the offer
             if (state.userId < message.userId) {
               console.log('📤 Creating offer (our ID comes first)')
-              createOffer(message.userId)
+              // Small delay to ensure both users are ready
+              setTimeout(() => {
+                createOffer(message.userId)
+              }, 100)
             } else {
               console.log('⏳ Waiting for offer (friend\'s ID comes first)')
               state.statusMessage = 'Friend joined! Waiting for connection...'
@@ -609,16 +617,37 @@ export default {
         })
       } catch (error) {
         console.error('❌ Error creating offer:', error)
+        // If there's an error, try to recover
+        if (error.name === 'InvalidStateError') {
+          console.log('🔄 Attempting to recover from offer creation error...')
+          try {
+            await state.peerConnection.setLocalDescription({ type: 'rollback' })
+            const offer = await state.peerConnection.createOffer()
+            await state.peerConnection.setLocalDescription(offer)
+            await sendMessage('offer', {
+              offer: offer,
+              targetUser: targetUser
+            })
+          } catch (recoveryError) {
+            console.error('❌ Failed to recover from offer creation error:', recoveryError)
+          }
+        }
       }
     }
 
     // Handle incoming offer
     const handleOffer = async (message) => {
       try {
+        console.log('📨 Received offer from:', message.from)
+        
         // If we're already negotiating, we might need to rollback
         if (state.peerConnection.signalingState !== 'stable') {
           console.log('🔄 Rolling back due to negotiation conflict')
-          await state.peerConnection.setLocalDescription({ type: 'rollback' })
+          try {
+            await state.peerConnection.setLocalDescription({ type: 'rollback' })
+          } catch (rollbackError) {
+            console.log('ℹ️ Rollback failed, continuing...')
+          }
         }
         
         await state.peerConnection.setRemoteDescription(message.offer)
@@ -665,6 +694,7 @@ export default {
     // Handle incoming answer
     const handleAnswer = async (message) => {
       try {
+        console.log('📨 Received answer from:', message.from)
         await state.peerConnection.setRemoteDescription(message.answer)
         console.log('✅ Set remote description (answer)')
         // Add pending ICE candidates after remote description is set
@@ -723,10 +753,15 @@ export default {
           return
         }
         
+        console.log('🚀 Starting call with user ID:', state.userId)
+        
         // Reset connection state
         state.isConnected = false
         state.isConnecting = true
         state.statusMessage = 'Getting ready...'
+        
+        // Clear pending ICE candidates
+        state.pendingIceCandidates = []
         
         // Close existing connections
         if (state.peerConnection) {
